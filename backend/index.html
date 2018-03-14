@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Twimetravel</title>
+    <script type="text/javascript" src="https://platform.twitter.com/widgets.js"></script>
+  </head>
+  <body>
+    <form method="GET">
+      <div>
+	Who (comma-delimited): <input type="text" id="who" name="who" />
+	From when (YYYY-MM-DDTHH:MM): <input type="text" id="from" name="from" />
+	To when (YYYY-MM-DDTHH:MM): <input type="text" id="to" name="to" />
+	Rate (higher is faster): <input type="text" id="rate" name="rate" value="1" />
+	<input type="submit" value="Start" onclick="maybeStart(); return false" />
+      </div>
+    </form>
+    <div id="container">
+    </div>
+    <script type="text/javascript">
+    function queueDisplays(event) {
+      var timeRate = parseFloat(getParam("rate") || 1);
+
+      var tweets = JSON.parse(this.responseText);
+      for (var i = 0; i < tweets.length; ++i) {
+	var tweet = tweets[i];
+	console.log("Scheduling tweet " + tweet.id + " to be displayed in " + tweet.seconds_since_start + " seconds.");
+	window.setTimeout(function(tweet) {
+	  var elem = document.createElement("blockquote");
+	  var container = document.getElementById("container");
+	  twttr.widgets.createTweet(tweet.id, elem, {});
+	  container.insertBefore(elem, container.firstElementChild);
+	}, tweet.seconds_since_start * 1000 / timeRate, tweet);
+      }
+    }
+
+    function maybeStart() {
+      var params = new URLSearchParams(window.location.search);
+      var who = getParam("who", params);
+      var from = getParam("from", params);
+      var to = getParam("to", params);
+      if (who && from && to) {
+	start(who, from, to);
+	document.getElementById("who").value = who;
+	document.getElementById("from").value = from;
+	document.getElementById("to").value = to;
+      }
+    }
+
+    function getParam(name, params) {
+      return document.getElementById(name).value || params.get(name);
+    }
+
+    maybeStart();
+
+    function start(who, from, to) {
+      var from = Date.parse(from) / 1000;
+      var to = Date.parse(to) / 1000;
+      var xhr = new XMLHttpRequest();
+      xhr.addEventListener("load", queueDisplays);
+      xhr.open("GET", "/feed/" + who + "/" + from + "/" + to);
+      xhr.send();
+    }
+    </script>
+  </body>
+</html>
