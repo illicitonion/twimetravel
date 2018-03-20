@@ -113,6 +113,7 @@ class App extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
+      error: null,
       tweets: [],
       rate: 1,
       requestId: 0,
@@ -123,22 +124,38 @@ class App extends React.Component {
   updateTweets(who, from, until, rate) {
     request(window.location.protocol + "//" + window.location.host + "/feed/" + who + "/" + (from / 1000) + "/" + (until / 1000), (error, response, body) => {
       if (error || response.statusCode !== 200) {
-        // TODO
+        this.setError(error || response.statusCode);
+        return;
       }
-      let content = JSON.parse(body);
-      this.setState(prevState => ({
-        tweets: content,
-        rate: rate,
-        requestId: prevState.requestId + 1,
-      }));
+      try {
+        let content = JSON.parse(body);
+        this.setState(prevState => ({
+          error: null,
+          tweets: content,
+          rate: rate,
+          requestId: prevState.requestId + 1,
+        }));
+      } catch (e) {
+        this.setError(e);
+        return;
+      }
     })
   }
 
+  setError(error) {
+    console.log(error);
+    this.setState(prevState => ({
+      error: "An error occurred fetching tweets",
+      requestId: prevState.requestId + 1,
+    }));
+  }
+
   render() {
+    let body = this.state.error ? <div style={{marginTop: '10px'}}>{this.state.error}</div> : <Twimeline tweets={this.state.tweets} rate={this.state.rate} requestId={this.state.requestId} />;
     return (
       <div>
         <Form onSubmit={this.updateTweets} />
-        <Twimeline tweets={this.state.tweets} rate={this.state.rate} requestId={this.state.requestId} />
+        {body}
       </div>
     );
   }
