@@ -1,5 +1,6 @@
 use oauthcli;
 use reqwest;
+use serde_json;
 use serde_urlencoded;
 use url;
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ pub struct OauthHandler {
 
     request_token_url: url::Url,
     authentication_url: url::Url,
+    verify_credentials_url: url::Url,
 
     app_token: Oauth1Token,
 }
@@ -22,6 +24,7 @@ impl OauthHandler {
     pub fn new(
         request_token_url: url::Url,
         authentication_url: url::Url,
+        verify_credentials_url: url::Url,
         app_token: Oauth1Token,
     ) -> OauthHandler {
         let tokens_awaiting_callbacks = Arc::new(Mutex::new(HashMap::new()));
@@ -29,6 +32,7 @@ impl OauthHandler {
             tokens_awaiting_callbacks,
             request_token_url,
             authentication_url,
+            verify_credentials_url,
             app_token,
         }
     }
@@ -75,7 +79,7 @@ impl OauthHandler {
         &self,
         oauth_token: String,
         oauth_verifier: String,
-    ) -> Result<(url::Url, Oauth1Token), String> {
+    ) -> Result<(url::Url, Context), String> {
         let client = reqwest::Client::new();
         let url =
             url::Url::parse("https://api.twitter.com/oauth/access_token").expect("Bad twitter URL");
@@ -116,22 +120,65 @@ impl OauthHandler {
         let response_text = response
             .text()
             .map_err(|err| format!("Error getting text from user timeline request {:?}", err))?;
-        let v: Oauth1Token = serde_urlencoded::from_str(&response_text).map_err(|err| {
+        let user_oauth_token: Oauth1Token = serde_urlencoded::from_str(&response_text).map_err(|err| {
             format!(
                 "Error deserializing dance respose ({}): {:?}",
                 response_text, err
             )
         })?;
-        println!("DWH: Got dance response: {:?}", v);
+        println!("DWH: Got dance response: {:?}", user_oauth_token);
+        let user_screen_name = self.get_user(&user_oauth_token)?;
 
-        Ok((redirect_url, v))
+        println!("DWH: User: {}", user_screen_name);
+        let context = Context {
+            user_oauth_token,
+            user_screen_name,
+        };
+
+        Ok((redirect_url, context))
     }
+
+    fn get_user(&self, user_token: &Oauth1Token) -> Result<String, String> {
+        let url = &self.verify_credentials_url;
+        let client = reqwest::Client::new();
+        let mut request = client.get(url.clone());
+        // TODO: Avoid these clones, should just be references everywhere
+        request.header(oauth1_header(
+            "GET",
+            &url,
+            &self.app_token,
+            Some(user_token),
+            vec![],
+        ));
+        let mut response = request
+            .send()
+            .map_err(|err| format!("Error verifying user: {:?}", err))?;
+
+        let response_text = response
+            .text()
+            .map_err(|err| format!("Error getting text verifying user: {:?}", err))?;
+
+        let r: VerifyCredentialsResponse = serde_json::from_str(&response_text)
+            .map_err(|err| format!("Error deserializing JSON from user verification: {:?}", err))?;
+        Ok(r.screen_name)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Context {
+    pub user_oauth_token: Oauth1Token,
+    pub user_screen_name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Oauth1Token {
     pub oauth_token: String,
     pub oauth_token_secret: String,
+}
+
+#[derive(Deserialize)]
+struct VerifyCredentialsResponse {
+    pub screen_name: String,
 }
 
 pub fn oauth1_header(

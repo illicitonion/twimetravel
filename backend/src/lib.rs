@@ -12,5 +12,6 @@ extern crate uuid;
 mod intervalstore;
 pub use intervalstore::{Interval, IntervalSet, IntervalStore, UniquelyIdentifiedTimeValue};
 pub mod oauth;
+pub use oauth::Context;
 mod tweetstore;
-pub use tweetstore::{Context, SecondsSinceUnixEpoch, TweetFromTwitter, TweetStore, TWEPOCH_MILLIS};
+pub use tweetstore::{SecondsSinceUnixEpoch, TweetFromTwitter, TweetStore, TWEPOCH_MILLIS};

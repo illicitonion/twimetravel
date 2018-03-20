@@ -1,9 +1,9 @@
-use {Interval, IntervalSet, IntervalStore, UniquelyIdentifiedTimeValue};
+use {Context, Interval, IntervalSet, IntervalStore, UniquelyIdentifiedTimeValue};
 use oauth;
 use reqwest;
 use serde_json;
 use std;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use time;
 use url;
@@ -54,13 +54,15 @@ impl UniquelyIdentifiedTimeValue<Snowflake> for TweetFromTwitter {
 #[derive(Clone)]
 pub struct TweetStore {
     app_token: oauth::Oauth1Token,
+    search_enabled_display_names: HashSet<String>,
     tweets: Arc<RwLock<HashMap<String, Arc<RwLock<IntervalStore<Snowflake, TweetFromTwitter>>>>>>,
 }
 
 impl TweetStore {
-    pub fn new(app_oauth_token: oauth::Oauth1Token) -> TweetStore {
+    pub fn new(app_oauth_token: oauth::Oauth1Token, search_enabled_display_names: HashSet<String>) -> TweetStore {
         TweetStore {
             app_token: app_oauth_token,
+            search_enabled_display_names: search_enabled_display_names,
             tweets: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -102,7 +104,13 @@ impl TweetStore {
     ) -> Result<(), String> {
         let tweets = match self.fetch_usertimeline(context, user, interval)? {
             Some(tweets) => tweets,
-            None => self.fetch_user_tweets_from_search(context, user, interval)?,
+            None => {
+                if self.search_enabled_display_names.contains(&context.user_screen_name) {
+                    self.fetch_user_tweets_from_search(context, user, interval)?
+                } else {
+                    return Err(format!("No tweets found, but can't guarantee no tweets should have been found"));
+                }
+            },
         };
 
         let interval_store_lock = self.interval_store(user);
@@ -276,10 +284,6 @@ impl TweetStore {
             Arc::new(RwLock::new(interval_store)),
         );
     }
-}
-
-pub struct Context {
-    pub user_oauth_token: oauth::Oauth1Token,
 }
 
 #[derive(Deserialize)]

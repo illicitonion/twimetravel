@@ -23,7 +23,7 @@ use gotham::router::builder::{DefineSingleRoute, DrawRoutes};
 use gotham::state::FromState;
 use hyper::header::AccessControlAllowOrigin;
 use mime_guess::get_mime_type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
@@ -86,11 +86,12 @@ impl<'a> Server {
             oauth_token: config.oauth.app_key.clone(),
             oauth_token_secret: config.oauth.app_secret.clone(),
         };
-        let tweets = TweetStore::new(app_token.clone());
+        let tweets = TweetStore::new(app_token.clone(), config.search_enabled_display_names.clone());
 
         let oauth_handler = oauth::OauthHandler::new(
             url::Url::parse("https://api.twitter.com/oauth/request_token").unwrap(),
             url::Url::parse("https://api.twitter.com/oauth/authenticate").unwrap(),
+            url::Url::parse("https://api.twitter.com/1.1/account/verify_credentials.json").unwrap(),
             app_token,
         );
 
@@ -113,7 +114,7 @@ impl<'a> Server {
     pub fn static_page(&self, state: gotham::state::State) -> (gotham::state::State, hyper::Response) {
         let res = {
             let path = hyper::Uri::borrow_from(&state).path();
-            if path == "/" && gotham::middleware::session::SessionData::<Option<oauth::Oauth1Token>>::borrow_from(&state).is_none() {
+            if path == "/" && gotham::middleware::session::SessionData::<Option<oauth::Context>>::borrow_from(&state).is_none() {
                 let redirect_url = {
                     let uri = hyper::Uri::borrow_from(&state);
                     if uri.is_absolute() {
@@ -197,14 +198,14 @@ impl<'a> Server {
                     )
             };
             match exchange_result {
-                Ok((url, token)) => {
+                Ok((url, context)) => {
                     let response = gotham::http::response::create_response(
                         &state,
                         hyper::StatusCode::Found,
                         None,
                     ).with_header(hyper::header::Location::new(url.into_string()));
-                    let session_data: &mut Option<oauth::Oauth1Token> = gotham::middleware::session::SessionData::borrow_mut_from(&mut state);
-                    *session_data = Some(token);
+                    let session_data: &mut Option<Context> = gotham::middleware::session::SessionData::borrow_mut_from(&mut state);
+                    *session_data = Some(context);
                     response
                 },
                 Err(err) => {
@@ -219,10 +220,10 @@ impl<'a> Server {
     pub fn feed(&self, state: gotham::state::State) -> (gotham::state::State, hyper::Response) {
         let response = {
             let feed_path = FeedPath::borrow_from(&state);
-            let maybe_oauth: &Option<oauth::Oauth1Token> = gotham::middleware::session::SessionData::borrow_from(&state);
-            let mut response = match maybe_oauth {
-                &Some(ref oauth) => {
-                    let (status_code, contents) = self.feed_impl(feed_path, oauth)
+            let maybe_context: &Option<Context> = gotham::middleware::session::SessionData::borrow_from(&state);
+            let mut response = match maybe_context {
+                &Some(ref context) => {
+                    let (status_code, contents) = self.feed_impl(feed_path, context)
                         .map(|v| (hyper::StatusCode::Ok, v))
                         .unwrap_or_else(|(status_code, contents)| {
                             (status_code, contents.as_bytes().to_vec())
@@ -256,13 +257,11 @@ impl<'a> Server {
     fn feed_impl(
         &self,
         feed_path: &FeedPath,
-        oauth: &oauth::Oauth1Token,
+        context: &Context,
     ) -> Result<Vec<u8>, (hyper::StatusCode, String)> {
         let tweets: Vec<_> = self.tweets
             .tweets(
-                &Context {
-                    user_oauth_token: oauth.clone().into(),
-                },
+                context,
                 &feed_path.who,
                 &Interval(feed_path.from.into(), feed_path.until.into()),
             )
@@ -303,7 +302,7 @@ fn router(server: Server) -> gotham::router::Router {
         gotham::pipeline::new_pipeline()
             .add(
                 gotham::middleware::session::NewSessionMiddleware::default()
-                    .with_session_type::<Option<oauth::Oauth1Token>>(),
+                    .with_session_type::<Option<oauth::Context>>(),
             )
             .build(),
     );
@@ -355,6 +354,7 @@ struct Config {
     listen_address: String,
     domain_name: String,
     static_site_path: String,
+    search_enabled_display_names: HashSet<String>,
 }
 
 #[derive(Deserialize)]
