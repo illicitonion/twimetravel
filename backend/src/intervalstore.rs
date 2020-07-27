@@ -196,7 +196,8 @@ impl<Time: Ord + Copy, Value: UniquelyIdentifiedTimeValue<Time> + Clone>
                 .iter()
                 .filter(|w| overlap.contains(&w.time))
                 .collect::<Vec<_>>()
-                != self.values
+                != self
+                    .values
                     .iter()
                     .filter(|w| overlap.contains(&w.time))
                     .collect::<Vec<_>>()

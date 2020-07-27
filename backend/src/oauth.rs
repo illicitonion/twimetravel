@@ -2,9 +2,9 @@ use oauthcli;
 use reqwest;
 use serde_json;
 use serde_urlencoded;
-use url;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use url;
 
 #[derive(Clone)]
 pub struct OauthHandler {
@@ -38,16 +38,19 @@ impl OauthHandler {
     }
 
     pub fn dance(&self, redirect_url: url::Url) -> Result<url::Url, String> {
-        let client = reqwest::Client::new();
-        let mut response = client
+        let client = reqwest::blocking::Client::new();
+        let response = client
             .get(self.request_token_url.as_str())
-            .header(oauth1_header(
-                "GET",
-                &self.request_token_url,
-                &self.app_token,
-                None,
-                vec![],
-            ))
+            .header(
+                reqwest::header::AUTHORIZATION,
+                oauth1_header(
+                    "GET",
+                    &self.request_token_url,
+                    &self.app_token,
+                    None,
+                    vec![],
+                ),
+            )
             .send()
             .map_err(|err| format!("Error requesting token: {:?}", err))?;
         let response_text = response.text().map_err(|err| {
@@ -80,12 +83,10 @@ impl OauthHandler {
         oauth_token: String,
         oauth_verifier: String,
     ) -> Result<(url::Url, Context), String> {
-        let client = reqwest::Client::new();
+        let client = reqwest::blocking::Client::new();
         let url =
             url::Url::parse("https://api.twitter.com/oauth/access_token").expect("Bad twitter URL");
         let params = vec![("oauth_verifier".to_owned(), oauth_verifier)];
-        let mut request = client.post(url.clone());
-        request.form(&params);
         let oauth_token_secret = {
             let tokens_awaiting_callbacks = self.tokens_awaiting_callbacks.lock().unwrap();
             tokens_awaiting_callbacks
@@ -95,17 +96,20 @@ impl OauthHandler {
                 .clone()
         };
         // TODO: Avoid these clones, should just be references everywhere
-        request.header(oauth1_header(
-            "POST",
-            &url,
-            &self.app_token,
-            Some(&Oauth1Token {
-                oauth_token: oauth_token.clone(),
-                oauth_token_secret: oauth_token_secret,
-            }),
-            params,
-        ));
-        let mut response = request
+        let request = client.post(url.clone()).form(&params).header(
+            reqwest::header::AUTHORIZATION,
+            oauth1_header(
+                "POST",
+                &url,
+                &self.app_token,
+                Some(&Oauth1Token {
+                    oauth_token: oauth_token.clone(),
+                    oauth_token_secret: oauth_token_secret,
+                }),
+                params,
+            ),
+        );
+        let response = request
             .send()
             .map_err(|err| format!("Error making user timeline request to twitter: {:?}", err))?;
 
@@ -120,12 +124,13 @@ impl OauthHandler {
         let response_text = response
             .text()
             .map_err(|err| format!("Error getting text from user timeline request {:?}", err))?;
-        let user_oauth_token: Oauth1Token = serde_urlencoded::from_str(&response_text).map_err(|err| {
-            format!(
-                "Error deserializing dance respose ({}): {:?}",
-                response_text, err
-            )
-        })?;
+        let user_oauth_token: Oauth1Token =
+            serde_urlencoded::from_str(&response_text).map_err(|err| {
+                format!(
+                    "Error deserializing dance respose ({}): {:?}",
+                    response_text, err
+                )
+            })?;
         println!("DWH: Got dance response: {:?}", user_oauth_token);
         let user_screen_name = self.get_user(&user_oauth_token)?;
 
@@ -140,17 +145,13 @@ impl OauthHandler {
 
     fn get_user(&self, user_token: &Oauth1Token) -> Result<String, String> {
         let url = &self.verify_credentials_url;
-        let client = reqwest::Client::new();
-        let mut request = client.get(url.clone());
+        let client = reqwest::blocking::Client::new();
         // TODO: Avoid these clones, should just be references everywhere
-        request.header(oauth1_header(
-            "GET",
-            &url,
-            &self.app_token,
-            Some(user_token),
-            vec![],
-        ));
-        let mut response = request
+        let request = client.get(url.clone()).header(
+            reqwest::header::AUTHORIZATION,
+            oauth1_header("GET", &url, &self.app_token, Some(user_token), vec![]),
+        );
+        let response = request
             .send()
             .map_err(|err| format!("Error verifying user: {:?}", err))?;
 
@@ -187,7 +188,7 @@ pub fn oauth1_header(
     app_token: &Oauth1Token,
     user_token: Option<&Oauth1Token>,
     params: Vec<(String, String)>,
-) -> reqwest::header::Authorization<String> {
+) -> String {
     let mut builder = oauthcli::OAuthAuthorizationHeaderBuilder::new(
         method,
         url,
@@ -204,10 +205,8 @@ pub fn oauth1_header(
         }
         None => {}
     };
-    reqwest::header::Authorization(
-        builder
-            .request_parameters(params.into_iter())
-            .finish_for_twitter()
-            .to_string(),
-    )
+    builder
+        .request_parameters(params.into_iter())
+        .finish_for_twitter()
+        .to_string()
 }

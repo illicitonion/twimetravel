@@ -22,13 +22,14 @@ extern crate walkdir;
 use gotham::router::builder::{DefineSingleRoute, DrawRoutes};
 use gotham::state::FromState;
 use hyper::header::AccessControlAllowOrigin;
-use mime_guess::get_mime_type;
+use mime_guess::from_ext;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
-use twimetravel::{oauth, Context, Interval, SecondsSinceUnixEpoch, TweetStore,
-                  UniquelyIdentifiedTimeValue};
+use twimetravel::{
+    oauth, Context, Interval, SecondsSinceUnixEpoch, TweetStore, UniquelyIdentifiedTimeValue,
+};
 use walkdir::WalkDir;
 
 fn main() {
@@ -44,7 +45,10 @@ fn main() {
         if entry.file_type().is_dir() {
             continue;
         }
-        let path = entry.path().strip_prefix(&config.static_site_path).expect("Error stripping prefix");
+        let path = entry
+            .path()
+            .strip_prefix(&config.static_site_path)
+            .expect("Error stripping prefix");
         if path.components().count() == 0 {
             continue;
         }
@@ -52,9 +56,18 @@ fn main() {
             ref some if some.as_str() == "/index.html" => "/".to_owned(),
             other => other,
         };
-        let extension = path.extension().and_then(|p| p.to_str()).unwrap_or_default();
+        let extension = path
+            .extension()
+            .and_then(|p| p.to_str())
+            .unwrap_or_default();
         println!("{:?}", extension);
-        static_bytes.insert(key, (read_file(&entry.path()), get_mime_type(extension)));
+        static_bytes.insert(
+            key,
+            (
+                read_file(&entry.path()),
+                from_ext(extension).first_or_octet_stream(),
+            ),
+        );
     }
 
     let server = Server::new(&config, static_bytes);
@@ -86,7 +99,10 @@ impl<'a> Server {
             oauth_token: config.oauth.app_key.clone(),
             oauth_token_secret: config.oauth.app_secret.clone(),
         };
-        let tweets = TweetStore::new(app_token.clone(), config.search_enabled_display_names.clone());
+        let tweets = TweetStore::new(
+            app_token.clone(),
+            config.search_enabled_display_names.clone(),
+        );
 
         let oauth_handler = oauth::OauthHandler::new(
             url::Url::parse("https://api.twitter.com/oauth/request_token").unwrap(),
@@ -97,8 +113,10 @@ impl<'a> Server {
 
         let domain_name = config.domain_name.clone();
         let cors_origin = format!("https://{}", domain_name);
-        let index_url = url::Url::parse(&format!("{}/", cors_origin)).expect("Failed to parse index URL");
-        let oauth_request_url = url::Url::parse(&format!("https://{}/oauth-request", domain_name)).expect("Failed to parse oauth request URL");
+        let index_url =
+            url::Url::parse(&format!("{}/", cors_origin)).expect("Failed to parse index URL");
+        let oauth_request_url = url::Url::parse(&format!("https://{}/oauth-request", domain_name))
+            .expect("Failed to parse oauth request URL");
 
         Server {
             oauth_handler,
@@ -111,10 +129,18 @@ impl<'a> Server {
         }
     }
 
-    pub fn static_page(&self, state: gotham::state::State) -> (gotham::state::State, hyper::Response) {
+    pub fn static_page(
+        &self,
+        state: gotham::state::State,
+    ) -> (gotham::state::State, hyper::Response) {
         let res = {
             let path = hyper::Uri::borrow_from(&state).path();
-            if path == "/" && gotham::middleware::session::SessionData::<Option<oauth::Context>>::borrow_from(&state).is_none() {
+            if path == "/"
+                && gotham::middleware::session::SessionData::<Option<oauth::Context>>::borrow_from(
+                    &state,
+                )
+                .is_none()
+            {
                 let redirect_url = {
                     let uri = hyper::Uri::borrow_from(&state);
                     if uri.is_absolute() {
@@ -124,38 +150,35 @@ impl<'a> Server {
                     }
                 };
                 let mut dance_url = self.oauth_request_url.clone();
-                dance_url.query_pairs_mut().append_pair("redirect_url", &redirect_url);
-                gotham::http::response::create_response(
-                    &state,
-                    hyper::StatusCode::Found,
-                    None,
-                ).with_header(hyper::header::Location::new(dance_url.into_string()))
+                dance_url
+                    .query_pairs_mut()
+                    .append_pair("redirect_url", &redirect_url);
+                gotham::http::response::create_response(&state, hyper::StatusCode::Found, None)
+                    .with_header(hyper::header::Location::new(dance_url.into_string()))
             } else {
                 match self.static_bytes.get(path) {
-                    Some(&(ref body, ref mime)) => {
-                        gotham::http::response::create_response(
-                            &state,
-                            hyper::StatusCode::Ok,
-                            Some((body.clone(), mime.clone())),
-                        )
-                    },
-                    None => {
-                        gotham::http::response::create_response(
-                            &state,
-                            hyper::StatusCode::NotFound,
-                            None
-                        )
-                    },
+                    Some(&(ref body, ref mime)) => gotham::http::response::create_response(
+                        &state,
+                        hyper::StatusCode::Ok,
+                        Some((body.clone(), mime.clone())),
+                    ),
+                    None => gotham::http::response::create_response(
+                        &state,
+                        hyper::StatusCode::NotFound,
+                        None,
+                    ),
                 }
             }
         };
         (state, res)
     }
 
-    pub fn oauth_request(&self, state: gotham::state::State) -> (gotham::state::State, hyper::Response) {
+    pub fn oauth_request(
+        &self,
+        state: gotham::state::State,
+    ) -> (gotham::state::State, hyper::Response) {
         let redirect_url = {
-            let query_params: &RedirectUrlQueryParam =
-                RedirectUrlQueryParam::borrow_from(&state);
+            let query_params: &RedirectUrlQueryParam = RedirectUrlQueryParam::borrow_from(&state);
             let url_result = query_params
                 .redirect_url
                 .as_ref()
@@ -166,18 +189,17 @@ impl<'a> Server {
                 (&Some(ref redirect_url), Some(Err(err))) => {
                     warn!("Error parsing redirect_url {}: {}", redirect_url, err);
                     self.index_url.clone()
-                },
+                }
                 _ => unreachable!(),
             }
         };
         let response = match self.oauth_handler.dance(redirect_url) {
             Ok(url_to_redirect_to) => {
-                gotham::http::response::create_response(
-                    &state,
-                    hyper::StatusCode::Found,
-                    None,
-                ).with_header(hyper::header::Location::new(url_to_redirect_to.into_string()))
-            },
+                gotham::http::response::create_response(&state, hyper::StatusCode::Found, None)
+                    .with_header(hyper::header::Location::new(
+                        url_to_redirect_to.into_string(),
+                    ))
+            }
             Err(err) => {
                 warn!("Error from oauth dance: {}", err);
                 Self::internal_server_error(&state)
@@ -186,16 +208,17 @@ impl<'a> Server {
         (state, response)
     }
 
-    pub fn oauth_callback(&self, mut state: gotham::state::State) -> (gotham::state::State, hyper::Response) {
+    pub fn oauth_callback(
+        &self,
+        mut state: gotham::state::State,
+    ) -> (gotham::state::State, hyper::Response) {
         let response = {
             let exchange_result = {
                 let query_params = OauthCallbackQueryParam::borrow_from(&state);
-                self
-                    .oauth_handler
-                    .exchange(
-                        query_params.oauth_token.clone(),
-                        query_params.oauth_verifier.clone(),
-                    )
+                self.oauth_handler.exchange(
+                    query_params.oauth_token.clone(),
+                    query_params.oauth_verifier.clone(),
+                )
             };
             match exchange_result {
                 Ok((url, context)) => {
@@ -203,11 +226,13 @@ impl<'a> Server {
                         &state,
                         hyper::StatusCode::Found,
                         None,
-                    ).with_header(hyper::header::Location::new(url.into_string()));
-                    let session_data: &mut Option<Context> = gotham::middleware::session::SessionData::borrow_mut_from(&mut state);
+                    )
+                    .with_header(hyper::header::Location::new(url.into_string()));
+                    let session_data: &mut Option<Context> =
+                        gotham::middleware::session::SessionData::borrow_mut_from(&mut state);
                     *session_data = Some(context);
                     response
-                },
+                }
                 Err(err) => {
                     warn!("Error in oauth callback: {}", err);
                     Self::internal_server_error(&state)
@@ -220,10 +245,12 @@ impl<'a> Server {
     pub fn feed(&self, state: gotham::state::State) -> (gotham::state::State, hyper::Response) {
         let response = {
             let feed_path = FeedPath::borrow_from(&state);
-            let maybe_context: &Option<Context> = gotham::middleware::session::SessionData::borrow_from(&state);
+            let maybe_context: &Option<Context> =
+                gotham::middleware::session::SessionData::borrow_from(&state);
             let mut response = match maybe_context {
                 &Some(ref context) => {
-                    let (status_code, contents) = self.feed_impl(feed_path, context)
+                    let (status_code, contents) = self
+                        .feed_impl(feed_path, context)
                         .map(|v| (hyper::StatusCode::Ok, v))
                         .unwrap_or_else(|(status_code, contents)| {
                             (status_code, contents.as_bytes().to_vec())
@@ -259,7 +286,8 @@ impl<'a> Server {
         feed_path: &FeedPath,
         context: &Context,
     ) -> Result<Vec<u8>, (hyper::StatusCode, String)> {
-        let tweets: Vec<_> = self.tweets
+        let tweets: Vec<_> = self
+            .tweets
             .tweets(
                 context,
                 &feed_path.who,
@@ -288,7 +316,10 @@ impl<'a> Server {
         gotham::http::response::create_response(
             &state,
             hyper::StatusCode::InternalServerError,
-            Some(("Internal server error".as_bytes().to_vec(), mime::TEXT_PLAIN)),
+            Some((
+                "Internal server error".as_bytes().to_vec(),
+                mime::TEXT_PLAIN,
+            )),
         )
     }
 }
@@ -310,18 +341,33 @@ fn router(server: Server) -> gotham::router::Router {
         route.get("/healthz").to(healthz);
         for path in server.static_bytes.keys() {
             let server = server.clone();
-            route.get(path).to_new_handler(move || Ok(|state| server.static_page(state)));
+            route.get(path).to_new_handler(move || {
+                let server = server.clone();
+                Ok(move |state| server.static_page(state))
+            });
         }
         // TODO: Tie these paths statically to Server fields.
-        route.get("/oauth-request").with_query_string_extractor::<RedirectUrlQueryParam>().to_new_handler(move || Ok(|state| server2.oauth_request(state)));
+        route
+            .get("/oauth-request")
+            .with_query_string_extractor::<RedirectUrlQueryParam>()
+            .to_new_handler(move || {
+                let server = server2.clone();
+                Ok(move |state| server.oauth_request(state))
+            });
         route
             .get("/oauth-callback")
             .with_query_string_extractor::<OauthCallbackQueryParam>()
-            .to_new_handler(move || Ok(|state| server3.oauth_callback(state)));
+            .to_new_handler(move || {
+                let server = server3.clone();
+                Ok(move |state| server.oauth_callback(state))
+            });
         route
             .get("/feed/:who/:from/:until")
             .with_path_extractor::<FeedPath>()
-            .to_new_handler(move || Ok(|state| server4.feed(state)));
+            .to_new_handler(move || {
+                let server = server4.clone();
+                Ok(move |state| server.feed(state))
+            });
     })
 }
 

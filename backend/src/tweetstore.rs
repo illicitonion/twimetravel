@@ -1,4 +1,3 @@
-use {Context, Interval, IntervalSet, IntervalStore, UniquelyIdentifiedTimeValue};
 use oauth;
 use reqwest;
 use serde_json;
@@ -7,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use time;
 use url;
+use {Context, Interval, IntervalSet, IntervalStore, UniquelyIdentifiedTimeValue};
 
 pub const TWEPOCH_MILLIS: u64 = 1288834974657;
 
@@ -59,7 +59,10 @@ pub struct TweetStore {
 }
 
 impl TweetStore {
-    pub fn new(app_oauth_token: oauth::Oauth1Token, search_enabled_display_names: HashSet<String>) -> TweetStore {
+    pub fn new(
+        app_oauth_token: oauth::Oauth1Token,
+        search_enabled_display_names: HashSet<String>,
+    ) -> TweetStore {
         TweetStore {
             app_token: app_oauth_token,
             search_enabled_display_names: search_enabled_display_names,
@@ -105,12 +108,17 @@ impl TweetStore {
         let tweets = match self.fetch_usertimeline(context, user, interval)? {
             Some(tweets) => tweets,
             None => {
-                if self.search_enabled_display_names.contains(&context.user_screen_name) {
+                if self
+                    .search_enabled_display_names
+                    .contains(&context.user_screen_name)
+                {
                     self.fetch_user_tweets_from_search(context, user, interval)?
                 } else {
-                    return Err(format!("No tweets found, but can't guarantee no tweets should have been found"));
+                    return Err(format!(
+                        "No tweets found, but can't guarantee no tweets should have been found"
+                    ));
                 }
-            },
+            }
         };
 
         let interval_store_lock = self.interval_store(user);
@@ -127,23 +135,24 @@ impl TweetStore {
         println!("Fetching from user timeline"); // TODO: Binary log requests and responses.
 
         let json_string = {
-            let client = reqwest::Client::new();
+            let client = reqwest::blocking::Client::new();
             let url = "https://api.twitter.com/1.1/statuses/user_timeline.json";
             let params = vec![
                 ("screen_name".to_owned(), user.to_owned()),
                 ("since_id".to_owned(), format!("{}", interval.0)),
                 ("max_id".to_owned(), format!("{}", &interval.1)),
             ];
-            let mut request = client.get(url);
-            request.query(&params);
-            request.header(oauth::oauth1_header(
-                "GET",
-                &url::Url::parse(url).expect("Bad twitter URL"),
-                &self.app_token,
-                Some(&context.user_oauth_token),
-                params,
-            ));
-            let mut response = request.send().map_err(|err| {
+            let request = client.get(url).query(&params).header(
+                reqwest::header::AUTHORIZATION,
+                oauth::oauth1_header(
+                    "GET",
+                    &url::Url::parse(url).expect("Bad twitter URL"),
+                    &self.app_token,
+                    Some(&context.user_oauth_token),
+                    params,
+                ),
+            );
+            let response = request.send().map_err(|err| {
                 format!("Error making user timeline request to twitter: {:?}", err)
             })?;
             response
@@ -174,7 +183,7 @@ impl TweetStore {
     ) -> Result<Vec<TweetFromTwitter>, String> {
         println!("Fetching from search API"); // TODO: Binary log requests and responses.
         let json_string = {
-            let client = reqwest::Client::new();
+            let client = reqwest::blocking::Client::new();
             // TODO: Choose which API to use based on interval
             let url = format!(
                 "https://api.twitter.com/1.1/tweets/search/{}",
@@ -184,18 +193,22 @@ impl TweetStore {
                 ("query", format!("from:{}", user)),
                 ("fromDate", TweetStore::as_twitter_time(&interval.0.into())),
                 ("toDate", TweetStore::as_twitter_time(&interval.1.into())),
-            ].into_iter()
-                .collect();
-            let mut response = client
+            ]
+            .into_iter()
+            .collect();
+            let response = client
                 .post(url.as_str())
                 .json(&params)
-                .header(oauth::oauth1_header(
-                    "POST",
-                    &url::Url::parse(&url).expect("Bad twitter URL"),
-                    &self.app_token,
-                    Some(&context.user_oauth_token),
-                    vec![],
-                ))
+                .header(
+                    reqwest::header::AUTHORIZATION,
+                    oauth::oauth1_header(
+                        "POST",
+                        &url::Url::parse(&url).expect("Bad twitter URL"),
+                        &self.app_token,
+                        Some(&context.user_oauth_token),
+                        vec![],
+                    ),
+                )
                 .send()
                 .map_err(|err| format!("Error making search request to twitter: {:?}", err))?;
             response
