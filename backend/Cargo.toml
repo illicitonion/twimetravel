@@ -12,7 +12,7 @@ log = "0.4"
 mime = "0.3"
 mime_guess = "2.0.0-alpha.3"
 oauthcli = { git = "https://github.com/illicitonion/rust-oauthcli.git", rev = "b898f9dc0384334c5fa0527c3ef80e94a68c1ad1" }
-reqwest = { version = "0.10", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = "1.0.27"
 serde_derive = "1.0.27"
 serde_json = "1"
