@@ -6,7 +6,7 @@ authors = ["Daniel Wagner-Hall <dawagner@gmail.com>"]
 [dependencies]
 env_logger = "0.5.4"
 gotham = "0.2"
-gotham_derive = "0.2"
+gotham_derive = "0.6"
 hyper = "0.11"
 log = "0.4"
 mime = "0.3"
