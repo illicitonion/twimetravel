@@ -1,0 +1,21 @@
+version: 2
+updates:
+- package-ecosystem: cargo
+  directory: "/backend"
+  schedule:
+    interval: daily
+    time: "07:00"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: time
+    versions:
+    - 0.2.25
+  - dependency-name: env_logger
+    versions:
+    - 0.8.2
+  - dependency-name: gotham_derive
+    versions:
+    - 0.5.0
+  - dependency-name: gotham
+    versions:
+    - 0.5.0
